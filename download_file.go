@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	defaultDownloadLink = "https://0807.st/D7zQ6xo.rar"
+	defaultDownloadLink   = "https://0807.st/D7zQ6xo.rar"
+	hypervisorRARPassword = "cs.rin.ru"
 
 	expectedArchiveSize = int64(3_853_243_886)
 	extractionBatchSize = 20
@@ -46,27 +47,29 @@ type installationProgress struct {
 type progressReporter func(installationProgress)
 
 type installerConfig struct {
-	downloadURL   string
-	expectedSize  int64
-	packageName   string
-	outputName    string
-	subtitle      string
-	resultTitle   string
-	resultText    string
-	downloadHint  string
-	cleanupVoices bool
+	downloadURL     string
+	archivePassword string
+	expectedSize    int64
+	packageName     string
+	outputName      string
+	subtitle        string
+	resultTitle     string
+	resultText      string
+	downloadHint    string
+	cleanupVoices   bool
 }
 
 func updateInstallerConfig() installerConfig {
 	return installerConfig{
-		downloadURL:  configuredDownloadLink(),
-		expectedSize: expectedArchiveSize,
-		packageName:  appText("update.package_name", "update"),
-		outputName:   appText("update.output_name", "Update"),
-		subtitle:     appText("update.subtitle", "Update 1.0.6 installer"),
-		resultTitle:  appText("update.result_title", "UPDATE INSTALLED"),
-		resultText:   appText("update.result_text", "All batches were extracted and copied into the game folder."),
-		downloadHint: appText("update.download_hint", "The file is approximately 3.6 GiB. Ctrl+C to cancel"),
+		downloadURL:     configuredDownloadLink(),
+		archivePassword: hypervisorRARPassword,
+		expectedSize:    expectedArchiveSize,
+		packageName:     appText("update.package_name", "update"),
+		outputName:      appText("update.output_name", "Update"),
+		subtitle:        appText("update.subtitle", "Update 1.0.6 installer"),
+		resultTitle:     appText("update.result_title", "UPDATE INSTALLED"),
+		resultText:      appText("update.result_text", "All batches were extracted and copied into the game folder."),
+		downloadHint:    appText("update.download_hint", "The file is approximately 3.6 GiB. Ctrl+C to cancel"),
 	}
 }
 
@@ -102,6 +105,7 @@ func downloadPackageWithProgress(config installerConfig, gamePath string, report
 		gamePath,
 		config.expectedSize,
 		extractionBatchSize,
+		config.archivePassword,
 		report,
 	); err != nil {
 		return err
@@ -129,6 +133,7 @@ func downloadAndInstallArchive(
 	gamePath string,
 	expectedSize int64,
 	batchSize int,
+	archivePassword string,
 	report progressReporter,
 ) error {
 	if batchSize <= 0 {
@@ -153,20 +158,50 @@ func downloadAndInstallArchive(
 		return fmt.Errorf("failed to download the package: %w", err)
 	}
 
-	tarPath, err := exec.LookPath("tar.exe")
-	if err != nil {
-		return fmt.Errorf("the native Windows extractor (tar.exe) was not found: %w", err)
+	// tar.exe is quick for unprotected archives on current Windows installations,
+	// but it cannot open password-protected RAR files. Those always use the
+	// built-in reader, which receives the package password below.
+	tarPath, tarLookupErr := exec.LookPath("tar.exe")
+	var tarInstallErr error
+	if archivePassword == "" && tarLookupErr == nil {
+		tarInstallErr = installArchiveInBatches(
+			ctx,
+			tarPath,
+			archivePath,
+			gamePath,
+			workRoot,
+			batchSize,
+			report,
+		)
+		if tarInstallErr == nil {
+			return nil
+		}
 	}
-	if err := installArchiveInBatches(
+
+	if fallbackErr := installRarArchiveInBatches(
 		ctx,
-		tarPath,
 		archivePath,
 		gamePath,
 		workRoot,
 		batchSize,
+		archivePassword,
 		report,
-	); err != nil {
-		return fmt.Errorf("failed to install the package: %w", err)
+	); fallbackErr != nil {
+		if archivePassword != "" {
+			return fmt.Errorf("failed to install the password-protected package with the built-in RAR extractor: %w", fallbackErr)
+		}
+		if tarLookupErr != nil {
+			return fmt.Errorf(
+				"failed to install the package with the built-in RAR extractor: %w (tar.exe was unavailable: %v)",
+				fallbackErr,
+				tarLookupErr,
+			)
+		}
+		return fmt.Errorf(
+			"failed to install the package: tar.exe failed: %v; built-in RAR extractor failed: %w",
+			tarInstallErr,
+			fallbackErr,
+		)
 	}
 	return nil
 }

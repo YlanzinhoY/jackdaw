@@ -315,6 +315,65 @@ func TestListArchiveFilesIgnoresDirectories(t *testing.T) {
 	}
 }
 
+func TestBuiltInRarExtractorInstallsArchive(t *testing.T) {
+	gamePath := filepath.Join(t.TempDir(), gameFolderName)
+	if err := os.Mkdir(gamePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootFile := filepath.Join(gamePath, "root.txt")
+	if err := os.WriteFile(rootFile, []byte("old root content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(rootFile, 0o400); err != nil {
+		t.Fatal(err)
+	}
+
+	var extractionBatches []int
+	lastCopied := 0
+	err := installRarArchiveInBatches(
+		context.Background(),
+		filepath.Join("testdata", "batch.rar"),
+		gamePath,
+		t.TempDir(),
+		2,
+		"",
+		func(progress installationProgress) {
+			if progress.Stage == stageExtracting {
+				extractionBatches = append(extractionBatches, progress.CurrentBatch)
+			}
+			if progress.Stage == stageCopying {
+				lastCopied = progress.CompletedFiles
+			}
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(extractionBatches) != "[1 2 3]" {
+		t.Fatalf("extraction batches = %v, want [1 2 3]", extractionBatches)
+	}
+	if lastCopied != 5 {
+		t.Fatalf("last copied count = %d, want 5", lastCopied)
+	}
+
+	wantContents := map[string]string{
+		"root.txt":            "new root content\n",
+		"config/settings.ini": "setting=true\n",
+		"data/one.bin":        "one\n",
+		"data/two.bin":        "two\n",
+		"data/space name.txt": "space\n",
+	}
+	for relative, want := range wantContents {
+		content, readErr := os.ReadFile(filepath.Join(gamePath, filepath.FromSlash(relative)))
+		if readErr != nil {
+			t.Fatalf("read %s: %v", relative, readErr)
+		}
+		if string(content) != want {
+			t.Fatalf("%s content = %q, want %q", relative, content, want)
+		}
+	}
+}
+
 func TestEndToEndDownloadsAndInstallsThreeBatches(t *testing.T) {
 	requireTar(t)
 	archive, err := os.ReadFile(filepath.Join("testdata", "batch.rar"))
@@ -352,6 +411,7 @@ func TestEndToEndDownloadsAndInstallsThreeBatches(t *testing.T) {
 		gamePath,
 		int64(len(archive)),
 		2,
+		"",
 		func(progress installationProgress) {
 			if progress.Stage == stageExtracting {
 				extractionBatches = append(extractionBatches, progress.CurrentBatch)
@@ -398,6 +458,12 @@ func TestEndToEndDownloadsAndInstallsThreeBatches(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), ".acbfr-work-") {
 			t.Fatalf("temporary work directory was not removed: %q", entry.Name())
 		}
+	}
+}
+
+func TestHypervisorRARPasswordIsConfigured(t *testing.T) {
+	if password := updateInstallerConfig().archivePassword; password != "cs.rin.ru" {
+		t.Fatalf("Hypervisor RAR password = %q, want cs.rin.ru", password)
 	}
 }
 

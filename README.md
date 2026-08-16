@@ -11,6 +11,7 @@
 - **Manual game-path support** — accepts a full installation path when Steam discovery is unavailable.
 - **Memory-efficient downloads** — processes large files in buffered chunks and writes them directly to disk without loading the complete archive into memory.
 - **Safe archive handling** — rejects unsafe paths, links, unsupported entries, and duplicate filenames before installing anything.
+- **Built-in RAR fallback** — installs packages even when the Windows `tar.exe` version cannot read the RAR file, including password-protected packages.
 - **Batched extraction** — extracts and copies large packages in small batches while showing download and installation progress.
 - **Voice-pack cleanup** — removes incompatible drivers, Reflex files, `vbs.cmd`, and `denuvOwO` artifacts after the Voices38 installation.
 - **Save resigner** — automatically detects the previous save key and resigns Black Flag saves for another Ubisoft account UUID.
@@ -27,7 +28,7 @@
 - Assassin's Creed Black Flag Resynced installed through Steam
 - A stable internet connection for package installation
 - Write access to the game and save folders
-- `tar.exe`, included with current Windows versions
+- No separate archive utility is required; `tar.exe` is used for regular archives when available, and the application includes a RAR fallback for protected or unsupported archives.
 
 ## Running the application
 
