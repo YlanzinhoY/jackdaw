@@ -1,6 +1,6 @@
-# ACBFR Updater
+# Jackdaw
 
-**ACBFR Updater** is a Windows terminal application for installing community packages and resigning save files for **Assassin's Creed Black Flag Resynced**. It combines the Hypervisor update installer, the Voices38 conversion package, and the save-resigning tools in a single keyboard-driven interface.
+**Jackdaw** is a Windows terminal application for installing community packages and resigning save files for **Assassin's Creed Black Flag Resynced**. It combines the Hypervisor update installer, the Voices38 conversion package, and the save-resigning tools in a single keyboard-driven interface.
 
 ## Features
 
@@ -35,7 +35,7 @@
 Close the game and Steam, then run:
 
 ```powershell
-.\bin\acbfr.exe
+.\bin\jackdaw.exe
 ```
 
 Use the arrow keys to navigate, `Enter` to confirm, `Esc` to go back, and `Ctrl+C` to cancel.
@@ -55,8 +55,8 @@ All regular TUI labels, prompts, status messages, installer descriptions, and th
 The application searches for `texts.json` beside the executable, in the parent directory of a `bin` folder, and in the current working directory. A custom location can also be selected with:
 
 ```powershell
-$env:ACBFR_TEXTS_FILE = "D:\ACBFR\my-texts.json"
-.\bin\acbfr.exe
+$env:ACBFR_TEXTS_FILE = "D:\Jackdaw\my-texts.json"
+.\bin\jackdaw.exe
 ```
 
 Keep placeholders such as `%s` and `%d` in formatted messages because the application replaces them with paths, UUIDs, counts, and progress values.
@@ -77,7 +77,7 @@ The update URL can be overridden without rebuilding:
 
 ```powershell
 $env:ACBFR_DOWNLOAD_URL = "https://server.example/update.rar"
-.\bin\acbfr.exe
+.\bin\jackdaw.exe
 ```
 
 ## Voice-pack installation
@@ -94,7 +94,7 @@ The voice-pack URL is configured in `voices.go` and can also be overridden witho
 
 ```powershell
 $env:ACBFR_VOICES_URL = "https://server.example/voices.rar"
-.\bin\acbfr.exe voices
+.\bin\jackdaw.exe voices
 ```
 
 ## Black Flag Voices save location
@@ -148,7 +148,7 @@ If Ubisoft or the game uses a nonstandard location, override the automatic paths
 ```powershell
 $env:ACBFR_SAVEGAMES_ROOT = "D:\Ubisoft\savegames"
 $env:ACBFR_GAME_PATH = "D:\SteamLibrary\steamapps\common\Assassin's Creed Black Flag Resynced"
-.\bin\acbfr.exe
+.\bin\jackdaw.exe
 ```
 
 ## Important notes
@@ -165,7 +165,7 @@ $env:ACBFR_GAME_PATH = "D:\SteamLibrary\steamapps\common\Assassin's Creed Black 
 go mod download
 go test ./...
 go vet ./...
-go build -o bin/acbfr.exe .
+go build -o bin/jackdaw.exe .
 ```
 
 Automated tests cover Steam discovery, safe archive extraction, voice-pack cleanup, UUID detection, save-key conversion, backups, and `UserId` synchronization.

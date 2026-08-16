@@ -26,7 +26,7 @@ func disableExplorerMousetrap() {
 
 func newRootCommand() *cobra.Command {
 	command := &cobra.Command{
-		Use:           "acbfr",
+		Use:           "jackdaw",
 		Short:         "Installs the Assassin's Creed Black Flag Resynced update",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
