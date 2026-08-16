@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/nwaples/rardecode/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -464,6 +465,57 @@ func TestEndToEndDownloadsAndInstallsThreeBatches(t *testing.T) {
 func TestHypervisorRARPasswordIsConfigured(t *testing.T) {
 	if password := updateInstallerConfig().archivePassword; password != "cs.rin.ru" {
 		t.Fatalf("Hypervisor RAR password = %q, want cs.rin.ru", password)
+	}
+}
+
+func TestEncryptedRarEntryRequiresPassword(t *testing.T) {
+	header := &rardecode.FileHeader{Name: "ACBlackFlag.exe", Encrypted: true}
+	if err := validateRarFileHeader(t.TempDir(), header, ""); err == nil || !strings.Contains(err.Error(), "requires a password") {
+		t.Fatalf("missing-password error = %v", err)
+	}
+	if err := validateRarFileHeader(t.TempDir(), header, "cs.rin.ru"); err != nil {
+		t.Fatalf("encrypted entry with password was rejected: %v", err)
+	}
+}
+
+func TestPasswordProtectedHypervisorRARIsInstalled(t *testing.T) {
+	archivePath := filepath.Join("testdata", "encrypted-hypervisor-fixture.rar")
+	gamePath := filepath.Join(t.TempDir(), gameFolderName)
+	if err := os.Mkdir(gamePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := installRarArchiveInBatches(
+		context.Background(),
+		archivePath,
+		gamePath,
+		t.TempDir(),
+		2,
+		"",
+		nil,
+	)
+	if err == nil {
+		t.Fatal("password-protected RAR was accepted without a password")
+	}
+
+	config := updateInstallerConfig()
+	if err := installRarArchiveInBatches(
+		context.Background(),
+		archivePath,
+		gamePath,
+		t.TempDir(),
+		2,
+		config.archivePassword,
+		nil,
+	); err != nil {
+		t.Fatalf("could not install password-protected RAR: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(gamePath, "ACBlackFlag.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "encrypted Hypervisor fixture\n" {
+		t.Fatalf("extracted contents = %q", contents)
 	}
 }
 

@@ -116,7 +116,7 @@ func installRarArchiveInBatches(
 		if header.IsDir {
 			continue
 		}
-		if err := validateRarFileHeader(gamePath, header); err != nil {
+		if err := validateRarFileHeader(gamePath, header, archivePassword); err != nil {
 			return err
 		}
 		key := rarEntryKey(header.Name)
@@ -173,7 +173,7 @@ func listRarArchiveFiles(archivePath string, validationRoot string, archivePassw
 		if header.IsDir {
 			continue
 		}
-		if err := validateRarFileHeader(validationRoot, header); err != nil {
+		if err := validateRarFileHeader(validationRoot, header, archivePassword); err != nil {
 			return nil, err
 		}
 		key := rarEntryKey(header.Name)
@@ -193,9 +193,9 @@ func openRarArchive(archivePath string, archivePassword string) (*rardecode.Read
 	return rardecode.OpenReader(archivePath, rardecode.Password(archivePassword))
 }
 
-func validateRarFileHeader(validationRoot string, header *rardecode.FileHeader) error {
-	if header.HeaderEncrypted || header.Encrypted {
-		return fmt.Errorf("encrypted RAR entries are not supported: %q", header.Name)
+func validateRarFileHeader(validationRoot string, header *rardecode.FileHeader, archivePassword string) error {
+	if (header.HeaderEncrypted || header.Encrypted) && archivePassword == "" {
+		return fmt.Errorf("encrypted RAR entry requires a password: %q", header.Name)
 	}
 	if !header.Mode().IsRegular() {
 		return fmt.Errorf("unsupported RAR entry type: %q", header.Name)
