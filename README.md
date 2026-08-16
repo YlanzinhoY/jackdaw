@@ -121,6 +121,21 @@ ACBlackFlag[ManualSave02].save
 ACBlackFlag[Options].save
 ```
 
+### Prepare your saves before resigning
+
+Follow these steps before choosing **Resign save files** in Jackdaw:
+
+1. Start the Black Flag Voices build and play long enough for the game to create its first save file. Then close the game.
+2. Open the folder that contains the saves you used with the Hypervisor build.
+3. Copy the Hypervisor `.save` files into the Voices save folder:
+
+   ```text
+   C:\Users\<WindowsUser>\AppData\Roaming\Goldberg UplayEmu Saves\66088
+   ```
+
+4. Run `jackdaw.exe`, select **Resign save files**, and choose that same `Goldberg UplayEmu Saves\66088` folder when the TUI asks for the save location.
+5. Confirm the detected Ubisoft UUID or enter the target account UUID, then let the resigner finish before reopening the game.
+
 ## Save resigner
 
 The save resigner performs the following workflow:
