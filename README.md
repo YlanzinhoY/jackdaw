@@ -1,64 +1,164 @@
 # ACBFR Updater
 
-Instalador para Windows da atualização **1.0.6 Ubi update only** do Assassin's Creed Black Flag Resynced.
+**ACBFR Updater** is a Windows terminal application for installing community packages and resigning save files for **Assassin's Creed Black Flag Resynced**. It combines the Hypervisor update installer, the Voices38 conversion package, and the save-resigning tools in a single keyboard-driven interface.
 
-O aplicativo localiza a instalação na Steam, baixa o RAR diretamente para o disco e substitui os arquivos correspondentes na pasta do jogo. Nenhum executável é renomeado e nenhum backup individual é criado pelo instalador.
+## Features
 
-## Como funciona
+- **Interactive TUI** — use a clear keyboard-driven interface instead of entering several commands manually.
+- **Hypervisor update installer** — downloads and installs update 1.0.6 directly into the Black Flag Resynced game folder.
+- **Voices38 conversion** — installs the HV to Voices package using the same guided workflow.
+- **Automatic Steam discovery** — searches the default Steam installation and every library registered in `libraryfolders.vdf`.
+- **Manual game-path support** — accepts a full installation path when Steam discovery is unavailable.
+- **Memory-efficient downloads** — processes large files in buffered chunks and writes them directly to disk without loading the complete archive into memory.
+- **Safe archive handling** — rejects unsafe paths, links, unsupported entries, and duplicate filenames before installing anything.
+- **Batched extraction** — extracts and copies large packages in small batches while showing download and installation progress.
+- **Voice-pack cleanup** — removes incompatible drivers, Reflex files, `vbs.cmd`, and `denuvOwO` artifacts after the Voices38 installation.
+- **Save resigner** — automatically detects the previous save key and resigns Black Flag saves for another Ubisoft account UUID.
+- **Automatic UUID detection** — reads the first valid account folder from Ubisoft's `savegames` directory and pre-fills the UUID in the TUI.
+- **Automatic Voices save path** — pre-fills `%APPDATA%\Goldberg UplayEmu Saves\66088` when the folder exists.
+- **Game settings synchronization** — finds the relevant settings file by its contents and updates its `[Settings]` `UserId` to match the resigned saves.
+- **Automatic backups** — preserves original saves and the game settings file before making changes.
+- **Editable interface text** — loads labels, prompts, status messages, and the watermark from `texts.json` without requiring a rebuild.
+- **Windows paste sanitization** — removes invisible control characters that can appear when paths are pasted into a terminal.
 
-- O download de `3.853.243.886 bytes` é transmitido com um buffer fixo de 1 MiB, sem carregar o RAR inteiro na memória.
-- O tamanho final é validado antes da instalação.
-- O RAR é inspecionado com o `tar.exe` nativo do Windows.
-- Apenas arquivos comuns são aceitos; caminhos inseguros, links e entradas duplicadas são rejeitados.
-- Os arquivos são extraídos em lotes de até 20.
-- Cada lote é copiado para a pasta do jogo e removido da área temporária antes do próximo.
-- Arquivos existentes, inclusive arquivos com atributo somente leitura, são substituídos.
+## Requirements
 
-Com aproximadamente 109 arquivos, a instalação usa seis lotes: cinco lotes de 20 e um lote final com os arquivos restantes.
+- Windows 10 or Windows 11
+- Assassin's Creed Black Flag Resynced installed through Steam
+- A stable internet connection for package installation
+- Write access to the game and save folders
+- `tar.exe`, included with current Windows versions
 
-## Requisitos
+## Running the application
 
-- Windows 10 ou Windows 11;
-- Assassin's Creed Black Flag Resynced instalado pela Steam;
-- conexão estável com a internet;
-- permissão de escrita na pasta do jogo;
-- espaço livre para o RAR de aproximadamente 3,6 GiB e para o maior lote extraído;
-- `tar.exe`, incluído nas versões atuais do Windows.
+Close the game and Steam, then run:
 
-## Como usar
+```powershell
+.\bin\acbfr.exe
+```
 
-1. Feche o jogo e a Steam.
-2. Execute `acbfr.exe`.
-3. Escolha **Procurar automaticamente na Steam** ou informe manualmente a pasta do jogo.
-4. Aguarde o download terminar.
-5. Aguarde todos os lotes serem extraídos e copiados.
+Use the arrow keys to navigate, `Enter` to confirm, `Esc` to go back, and `Ctrl+C` to cancel.
 
-Exemplo de caminho:
+The main menu contains:
+
+1. **Install update 1.0.6 — Hypervisor**
+2. **Install Voices38 pack — HV to Voices**
+3. **Resign save files**
+
+Every TUI screen includes the `Made by YlanzinhoY` footer.
+
+## Customizing application text
+
+All regular TUI labels, prompts, status messages, installer descriptions, and the watermark are stored in [`texts.json`](texts.json). Edit the value on the right side of any JSON key, then restart the application. Rebuilding is not required.
+
+The application searches for `texts.json` beside the executable, in the parent directory of a `bin` folder, and in the current working directory. A custom location can also be selected with:
+
+```powershell
+$env:ACBFR_TEXTS_FILE = "D:\ACBFR\my-texts.json"
+.\bin\acbfr.exe
+```
+
+Keep placeholders such as `%s` and `%d` in formatted messages because the application replaces them with paths, UUIDs, counts, and progress values.
+
+## Update installation
+
+The updater locates the Steam installation automatically or accepts the full game path manually.
+
+Example:
 
 ```text
 D:\SteamLibrary\steamapps\common\Assassin's Creed Black Flag Resynced
 ```
 
-Use as setas para navegar, `Enter` para confirmar, `Esc` para voltar e `Ctrl+C` para cancelar.
+Large downloads are processed in buffered chunks and written directly to disk, so the complete archive is never loaded into memory. The archive is validated for unsafe paths and links before its files are extracted and installed in small batches.
 
-## Observações importantes
-
-- A instalação substitui arquivos existentes diretamente.
-- Não execute o jogo ou a Steam durante a atualização.
-- Se um lote falhar depois que lotes anteriores foram copiados, a instalação pode ficar parcial. Nesse caso, execute o instalador novamente ou verifique os arquivos pela Steam antes de tentar outra vez.
-- O RAR real de aproximadamente 3,6 GiB não faz parte dos testes automatizados nem do repositório.
-- O link fornecido ao projeto possui assinatura com expiração em 12/08/2026 às 06:00 UTC. Um link renovado pode ser informado sem recompilar por meio da variável `ACBFR_DOWNLOAD_URL`.
-
-Exemplo de link renovado:
+The update URL can be overridden without rebuilding:
 
 ```powershell
-$env:ACBFR_DOWNLOAD_URL = "https://servidor/exemplo/update.rar"
-.\acbfr.exe
+$env:ACBFR_DOWNLOAD_URL = "https://server.example/update.rar"
+.\bin\acbfr.exe
 ```
 
-## Desenvolvimento
+## Voice-pack installation
 
-Os testes usam um RAR pequeno e local que reproduz extração em lotes, subpastas e sobrescrita de arquivos sem baixar o pacote real.
+The voice-pack option uses the same automatic Steam detection, download, archive validation, batched extraction, and installation process.
+
+After installation, it removes the following unwanted components from inside the selected game folder:
+
+- `driver_amd` and `driver_intel` folders;
+- `reflex.dll`, `reflex.ini`, and `vbs.cmd`;
+- any file or folder whose name contains `denuvOwO`, case-insensitively.
+
+The voice-pack URL is configured in `voices.go` and can also be overridden without rebuilding:
+
+```powershell
+$env:ACBFR_VOICES_URL = "https://server.example/voices.rar"
+.\bin\acbfr.exe voices
+```
+
+## Black Flag Voices save location
+
+The Black Flag Voices build stores its save files in:
+
+```text
+%APPDATA%\Goldberg UplayEmu Saves\66088
+```
+
+On a standard Windows installation, this expands to:
+
+```text
+C:\Users\<WindowsUser>\AppData\Roaming\Goldberg UplayEmu Saves\66088
+```
+
+This is the recommended folder for the Black Flag saves you want to use with the Voices build. Copy your `.save` files into this folder, open **Resign save files** in the TUI, and select this exact folder when asked for the save location.
+
+Typical recognized files include:
+
+```text
+ACBlackFlag[AutoSave01].save
+ACBlackFlag[ManualSave02].save
+ACBlackFlag[Options].save
+```
+
+## Save resigner
+
+The save resigner performs the following workflow:
+
+1. Reads all recognized `.save` files directly inside the selected folder.
+2. Looks for the first valid account UUID folder in:
+
+   ```text
+   C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\savegames
+   ```
+
+3. Pre-fills the detected UUID in the TUI so it can be confirmed or edited.
+4. Detects each save's previous encryption key automatically from known save data.
+5. Creates backups before modifying any save.
+6. Resigns every save with the target account UUID.
+7. Locates the Black Flag installation through Steam.
+8. Finds the game's settings file by its contents and changes its `[Settings]` `UserId` to the same UUID.
+
+Original saves are copied to a sibling `Backup` folder. `Backup\info.txt` records the target UUID and the previous MD5 value for each converted save.
+
+Before the game settings file is changed, the application creates a copy next to it with the `.acbfr.bak` suffix. Other settings such as `Username`, `Email`, `Language`, DLC entries, items, and chunks are preserved.
+
+If Ubisoft or the game uses a nonstandard location, override the automatic paths:
+
+```powershell
+$env:ACBFR_SAVEGAMES_ROOT = "D:\Ubisoft\savegames"
+$env:ACBFR_GAME_PATH = "D:\SteamLibrary\steamapps\common\Assassin's Creed Black Flag Resynced"
+.\bin\acbfr.exe
+```
+
+## Important notes
+
+- Keep the game and Steam closed while installing packages or resigning saves.
+- Package installation overwrites matching files in the game folder.
+- Never delete the generated backups until the converted saves have been tested in-game.
+- If a batch fails after previous batches were installed, run the installer again or verify the game files through Steam.
+- This is an independent community project and is not affiliated with Ubisoft, Assassin's Creed, or Steam.
+
+## Development
 
 ```powershell
 go mod download
@@ -67,8 +167,8 @@ go vet ./...
 go build -o bin/acbfr.exe .
 ```
 
-## Licença
+Automated tests cover Steam discovery, safe archive extraction, voice-pack cleanup, UUID detection, save-key conversion, backups, and `UserId` synchronization.
 
-Distribuído sob a [Apache License 2.0](LICENSE).
+## License
 
-Este é um projeto independente e não possui afiliação com Ubisoft, Assassin's Creed ou Steam.
+Distributed under the [Apache License 2.0](LICENSE).

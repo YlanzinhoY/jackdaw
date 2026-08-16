@@ -1,0 +1,75 @@
+{
+  "brand.title": "ASSASSIN'S CREED BLACK FLAG RESYNCED",
+  "watermark": "Made by YlanzinhoY",
+
+  "menu.subtitle": "Choose an action",
+  "menu.update": "Install update 1.0.6 — Hypervisor",
+  "menu.voices": "Install Voices38 pack — HV to Voices",
+  "menu.resign": "Resign save files",
+  "controls.menu": "↑/↓ navigate • Enter select • Esc quit",
+
+  "save_folder.title": "SAVE FOLDER",
+  "save_folder.prompt": "Paste the path to the folder containing the .save files:",
+  "save_folder.placeholder": "C:\\Users\\<WindowsUser>\\AppData\\Roaming\\Goldberg UplayEmu Saves\\66088",
+  "save_folder.detect_hint": "ACBlackFlag[...].save files are detected automatically.",
+  "save_folder.uuid_missing": "Account UUID was not detected automatically; you can enter it on the next screen.",
+  "save_folder.uuid_found": "UUID detected automatically: %s",
+  "save_folder.controls": "Enter continue • Ctrl+U clear • Esc back",
+
+  "save_uuid.title": "NEW SAVE KEY",
+  "save_uuid.prompt": "Confirm or enter the UUID of the account that will use these saves:",
+  "save_uuid.detected_prompt": "Confirm the detected UUID or edit it if necessary:",
+  "save_uuid.files_found": "%d .save file(s) found in:",
+  "save_uuid.placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "save_uuid.hint": "The previous key is detected automatically from the save data.",
+  "save_uuid.controls": "Enter resign • Ctrl+U clear • Esc back",
+  "save_uuid.invalid": "enter a valid UUID containing 32 hexadecimal characters",
+
+  "save_processing.title": "RESIGNING SAVE FILES",
+  "save_processing.status": "Creating backups and resigning files...",
+  "save_processing.controls": "Do not close the program. Ctrl+C to cancel",
+
+  "save_result.title": "SAVE FILES RESIGNED",
+  "save_result.count": "%d file(s) resigned.",
+  "save_result.backup": "Original-file backup:",
+  "save_result.settings": "UserId synchronized in:",
+  "controls.quit": "Enter or q to quit",
+
+  "location.auto": "Find automatically through Steam",
+  "location.manual": "Enter the full path",
+  "location.prompt": "Where is the game installed?",
+  "location.not_found": "%s was not found in your Steam libraries.",
+
+  "manual_path.title": "GAME FOLDER",
+  "manual_path.prompt": "Paste or enter the full path:",
+  "manual_path.placeholder": "D:\\SteamLibrary\\steamapps\\common\\Assassin's Creed Black Flag Resynced",
+  "manual_path.controls": "Enter confirm • Ctrl+U clear • Esc back",
+
+  "steam.title": "INSTALLATIONS FOUND",
+  "steam.controls": "↑/↓ navigate • Enter select • Esc back",
+
+  "install.title": "DOWNLOADING AND INSTALLING",
+  "install.listing": "Reading the RAR file list...",
+  "install.extracting": "Extracting batch %d/%d (up to %d files per batch)...",
+  "install.copying": "Copying batch %d/%d... %d/%d files",
+  "install.cleaning": "Removing unwanted voice-pack files...",
+  "download.connecting": "Connecting to the server...",
+  "download.downloaded": "Downloaded: %s",
+
+  "error.title": "UNABLE TO CONTINUE",
+  "error.controls": "Enter or Esc to go back",
+
+  "update.package_name": "update",
+  "update.output_name": "Update",
+  "update.subtitle": "Update 1.0.6 installer",
+  "update.result_title": "UPDATE INSTALLED",
+  "update.result_text": "All batches were extracted and copied into the game folder.",
+  "update.download_hint": "The file is approximately 3.6 GiB. Ctrl+C to cancel",
+
+  "voices.package_name": "voice pack",
+  "voices.output_name": "Voice pack",
+  "voices.subtitle": "Voice-pack installer",
+  "voices.result_title": "VOICE PACK INSTALLED",
+  "voices.result_text": "The voice files were installed and unwanted components were removed.",
+  "voices.download_hint": "The size will be detected from the server. Ctrl+C to cancel"
+}

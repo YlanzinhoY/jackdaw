@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	defaultDownloadLink = "https://dl.0807.st/D7zQ6xo.rar/Assassins.Creed.Black.Flag.Resynced.1.0.6.Ubi.update.only.rar?e=1786514400000&d=a&ct=application%2Foctet-stream&s=2376505ec1ec9cc8ef191d9c4c5f174a"
+	defaultDownloadLink = "https://0807.st/D7zQ6xo.rar"
 
 	expectedArchiveSize = int64(3_853_243_886)
 	extractionBatchSize = 20
@@ -29,6 +30,7 @@ const (
 	stageListing
 	stageExtracting
 	stageCopying
+	stageCleaning
 )
 
 type installationProgress struct {
@@ -43,16 +45,74 @@ type installationProgress struct {
 
 type progressReporter func(installationProgress)
 
+type installerConfig struct {
+	downloadURL   string
+	expectedSize  int64
+	packageName   string
+	outputName    string
+	subtitle      string
+	resultTitle   string
+	resultText    string
+	downloadHint  string
+	cleanupVoices bool
+}
+
+func updateInstallerConfig() installerConfig {
+	return installerConfig{
+		downloadURL:  configuredDownloadLink(),
+		expectedSize: expectedArchiveSize,
+		packageName:  appText("update.package_name", "update"),
+		outputName:   appText("update.output_name", "Update"),
+		subtitle:     appText("update.subtitle", "Update 1.0.6 installer"),
+		resultTitle:  appText("update.result_title", "UPDATE INSTALLED"),
+		resultText:   appText("update.result_text", "All batches were extracted and copied into the game folder."),
+		downloadHint: appText("update.download_hint", "The file is approximately 3.6 GiB. Ctrl+C to cancel"),
+	}
+}
+
+func (config installerConfig) validate() error {
+	if strings.TrimSpace(config.downloadURL) == "" {
+		return fmt.Errorf(
+			"the %s URL is not configured; paste it into voicesDownloadLink in voices.go or set ACBFR_VOICES_URL",
+			config.packageName,
+		)
+	}
+	parsedURL, err := url.ParseRequestURI(config.downloadURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		return fmt.Errorf("the %s URL is invalid", config.packageName)
+	}
+	if config.expectedSize < 0 {
+		return fmt.Errorf("the expected %s size cannot be negative", config.packageName)
+	}
+	return nil
+}
+
 func downloadFilesWithProgress(gamePath string, report progressReporter) error {
-	return downloadAndInstallArchive(
+	return downloadPackageWithProgress(updateInstallerConfig(), gamePath, report)
+}
+
+func downloadPackageWithProgress(config installerConfig, gamePath string, report progressReporter) error {
+	if err := config.validate(); err != nil {
+		return err
+	}
+	if err := downloadAndInstallArchive(
 		context.Background(),
 		http.DefaultClient,
-		configuredDownloadLink(),
+		config.downloadURL,
 		gamePath,
-		expectedArchiveSize,
+		config.expectedSize,
 		extractionBatchSize,
 		report,
-	)
+	); err != nil {
+		return err
+	}
+	if config.cleanupVoices {
+		reportProgress(report, installationProgress{Stage: stageCleaning})
+		if err := cleanupVoicesArtifacts(gamePath); err != nil {
+			return fmt.Errorf("failed to remove unwanted voice-pack files: %w", err)
+		}
+	}
+	return nil
 }
 
 func configuredDownloadLink() string {
@@ -72,30 +132,30 @@ func downloadAndInstallArchive(
 	report progressReporter,
 ) error {
 	if batchSize <= 0 {
-		return fmt.Errorf("o tamanho do lote deve ser maior que zero")
+		return fmt.Errorf("the batch size must be greater than zero")
 	}
 	info, err := os.Stat(gamePath)
 	if err != nil {
-		return fmt.Errorf("não foi possível acessar a pasta do jogo: %w", err)
+		return fmt.Errorf("could not access the game folder: %w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("o caminho do jogo não é uma pasta: %q", gamePath)
+		return fmt.Errorf("the game path is not a folder: %q", gamePath)
 	}
 
 	workRoot, err := os.MkdirTemp(gamePath, ".acbfr-work-*")
 	if err != nil {
-		return fmt.Errorf("não foi possível criar a área temporária na pasta do jogo: %w", err)
+		return fmt.Errorf("could not create the temporary workspace in the game folder: %w", err)
 	}
 	defer os.RemoveAll(workRoot)
 
 	archivePath := filepath.Join(workRoot, "update.rar")
 	if err := downloadArchive(ctx, client, sourceURL, archivePath, expectedSize, report); err != nil {
-		return fmt.Errorf("falha ao baixar a atualização: %w", err)
+		return fmt.Errorf("failed to download the package: %w", err)
 	}
 
 	tarPath, err := exec.LookPath("tar.exe")
 	if err != nil {
-		return fmt.Errorf("o extrator nativo do Windows (tar.exe) não foi encontrado: %w", err)
+		return fmt.Errorf("the native Windows extractor (tar.exe) was not found: %w", err)
 	}
 	if err := installArchiveInBatches(
 		ctx,
@@ -106,7 +166,7 @@ func downloadAndInstallArchive(
 		batchSize,
 		report,
 	); err != nil {
-		return fmt.Errorf("falha ao instalar a atualização: %w", err)
+		return fmt.Errorf("failed to install the package: %w", err)
 	}
 	return nil
 }
@@ -121,7 +181,7 @@ func downloadArchive(
 ) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
-		return fmt.Errorf("não foi possível preparar o download: %w", err)
+		return fmt.Errorf("could not prepare the download: %w", err)
 	}
 	request.Header.Set("Accept", "application/octet-stream")
 	request.Header.Set("User-Agent", "acbfr/0.0.1")
@@ -132,11 +192,11 @@ func downloadArchive(
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("o servidor respondeu %s", response.Status)
+		return fmt.Errorf("the server returned %s", response.Status)
 	}
 	if expectedSize > 0 && response.ContentLength > 0 && response.ContentLength != expectedSize {
 		return fmt.Errorf(
-			"tamanho inesperado informado pelo servidor: recebido %d bytes, esperado %d",
+			"unexpected size reported by the server: received %d bytes, expected %d",
 			response.ContentLength,
 			expectedSize,
 		)
@@ -144,7 +204,7 @@ func downloadArchive(
 
 	output, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return fmt.Errorf("não foi possível criar o arquivo temporário: %w", err)
+		return fmt.Errorf("could not create the temporary file: %w", err)
 	}
 
 	totalBytes := response.ContentLength
@@ -163,19 +223,19 @@ func downloadArchive(
 	progress.finish()
 	closeErr := output.Close()
 	if copyErr != nil {
-		return fmt.Errorf("não foi possível salvar o download: %w", copyErr)
+		return fmt.Errorf("could not save the download: %w", copyErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("não foi possível finalizar o arquivo baixado: %w", closeErr)
+		return fmt.Errorf("could not finalize the downloaded file: %w", closeErr)
 	}
 	if written == 0 {
-		return fmt.Errorf("o servidor retornou um arquivo vazio")
+		return fmt.Errorf("the server returned an empty file")
 	}
 	if response.ContentLength > 0 && written != response.ContentLength {
-		return fmt.Errorf("download incompleto: recebido %d de %d bytes", written, response.ContentLength)
+		return fmt.Errorf("incomplete download: received %d of %d bytes", written, response.ContentLength)
 	}
 	if expectedSize > 0 && written != expectedSize {
-		return fmt.Errorf("download incompleto: recebido %d de %d bytes", written, expectedSize)
+		return fmt.Errorf("incomplete download: received %d of %d bytes", written, expectedSize)
 	}
 	return nil
 }
@@ -195,7 +255,7 @@ func installArchiveInBatches(
 		return err
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("o arquivo RAR não contém arquivos")
+		return fmt.Errorf("the RAR archive contains no files")
 	}
 
 	batches := splitIntoBatches(files, batchSize)
@@ -204,7 +264,7 @@ func installArchiveInBatches(
 		batchNumber := batchIndex + 1
 		batchRoot := filepath.Join(workRoot, fmt.Sprintf("batch-%03d", batchNumber))
 		if err := os.Mkdir(batchRoot, 0o755); err != nil {
-			return fmt.Errorf("não foi possível criar o lote %d: %w", batchNumber, err)
+			return fmt.Errorf("could not create batch %d: %w", batchNumber, err)
 		}
 
 		reportProgress(report, installationProgress{
@@ -222,7 +282,7 @@ func installArchiveInBatches(
 		if extractErr != nil {
 			_ = os.RemoveAll(batchRoot)
 			return fmt.Errorf(
-				"não foi possível extrair o lote %d/%d: %w: %s",
+				"could not extract batch %d/%d: %w: %s",
 				batchNumber,
 				len(batches),
 				extractErr,
@@ -231,7 +291,7 @@ func installArchiveInBatches(
 		}
 		if err := verifyExtractedBatch(batchRoot, batch); err != nil {
 			_ = os.RemoveAll(batchRoot)
-			return fmt.Errorf("o lote %d/%d é inválido: %w", batchNumber, len(batches), err)
+			return fmt.Errorf("batch %d/%d is invalid: %w", batchNumber, len(batches), err)
 		}
 
 		copied, err := copyBatchWithProgress(
@@ -245,15 +305,15 @@ func installArchiveInBatches(
 		)
 		if err != nil {
 			_ = os.RemoveAll(batchRoot)
-			return fmt.Errorf("não foi possível copiar o lote %d/%d: %w", batchNumber, len(batches), err)
+			return fmt.Errorf("could not copy batch %d/%d: %w", batchNumber, len(batches), err)
 		}
 		if copied != len(batch) {
 			_ = os.RemoveAll(batchRoot)
-			return fmt.Errorf("o lote %d copiou %d de %d arquivos", batchNumber, copied, len(batch))
+			return fmt.Errorf("batch %d copied %d of %d files", batchNumber, copied, len(batch))
 		}
 		completedFiles += copied
 		if err := os.RemoveAll(batchRoot); err != nil {
-			return fmt.Errorf("não foi possível limpar o lote %d: %w", batchNumber, err)
+			return fmt.Errorf("could not clean up batch %d: %w", batchNumber, err)
 		}
 	}
 	return nil
@@ -262,17 +322,17 @@ func installArchiveInBatches(
 func listArchiveFiles(ctx context.Context, tarPath string, archivePath string, validationRoot string) ([]string, error) {
 	namesOutput, err := exec.CommandContext(ctx, tarPath, "-tf", archivePath).CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("não foi possível listar o RAR: %w: %s", err, strings.TrimSpace(string(namesOutput)))
+		return nil, fmt.Errorf("could not list the RAR archive: %w: %s", err, strings.TrimSpace(string(namesOutput)))
 	}
 	verboseOutput, err := exec.CommandContext(ctx, tarPath, "-tvf", archivePath).CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("não foi possível inspecionar o RAR: %w: %s", err, strings.TrimSpace(string(verboseOutput)))
+		return nil, fmt.Errorf("could not inspect the RAR archive: %w: %s", err, strings.TrimSpace(string(verboseOutput)))
 	}
 
 	names := outputLines(namesOutput)
 	verboseLines := outputLines(verboseOutput)
 	if len(names) != len(verboseLines) {
-		return nil, fmt.Errorf("a listagem do RAR é inconsistente: %d nomes e %d detalhes", len(names), len(verboseLines))
+		return nil, fmt.Errorf("the RAR listing is inconsistent: %d names and %d details", len(names), len(verboseLines))
 	}
 
 	files := make([]string, 0, len(names))
@@ -280,21 +340,21 @@ func listArchiveFiles(ctx context.Context, tarPath string, archivePath string, v
 	for index, archiveName := range names {
 		verboseLine := verboseLines[index]
 		if verboseLine == "" {
-			return nil, fmt.Errorf("entrada %q não possui metadados", archiveName)
+			return nil, fmt.Errorf("entry %q has no metadata", archiveName)
 		}
 		entryType := verboseLine[0]
 		if entryType == 'd' {
 			continue
 		}
 		if entryType != '-' {
-			return nil, fmt.Errorf("tipo de entrada não permitido no RAR: %q", archiveName)
+			return nil, fmt.Errorf("unsupported RAR entry type: %q", archiveName)
 		}
 		if _, err := archiveDestination(validationRoot, archiveName); err != nil {
 			return nil, err
 		}
 		key := strings.ToLower(strings.ReplaceAll(archiveName, `\`, "/"))
 		if _, exists := seen[key]; exists {
-			return nil, fmt.Errorf("arquivo duplicado no RAR: %q", archiveName)
+			return nil, fmt.Errorf("duplicate file in RAR archive: %q", archiveName)
 		}
 		seen[key] = struct{}{}
 		files = append(files, archiveName)
@@ -345,7 +405,7 @@ func verifyExtractedBatch(batchRoot string, expectedFiles []string) error {
 			return nil
 		}
 		if !entry.Type().IsRegular() {
-			return fmt.Errorf("tipo de arquivo extraído não permitido: %q", entry.Name())
+			return fmt.Errorf("unsupported extracted file type: %q", entry.Name())
 		}
 		relative, err := filepath.Rel(batchRoot, filePath)
 		if err != nil {
@@ -353,7 +413,7 @@ func verifyExtractedBatch(batchRoot string, expectedFiles []string) error {
 		}
 		key := strings.ToLower(filepath.ToSlash(relative))
 		if _, exists := expected[key]; !exists {
-			return fmt.Errorf("arquivo inesperado extraído: %q", relative)
+			return fmt.Errorf("unexpected extracted file: %q", relative)
 		}
 		delete(expected, key)
 		found++
@@ -363,7 +423,7 @@ func verifyExtractedBatch(batchRoot string, expectedFiles []string) error {
 		return err
 	}
 	if found != len(expectedFiles) || len(expected) != 0 {
-		return fmt.Errorf("foram extraídos %d de %d arquivos", found, len(expectedFiles))
+		return fmt.Errorf("extracted %d of %d files", found, len(expectedFiles))
 	}
 	return nil
 }
@@ -391,20 +451,20 @@ func copyBatchWithProgress(
 			return os.MkdirAll(destinationPath, 0o755)
 		}
 		if !entry.Type().IsRegular() {
-			return fmt.Errorf("tipo de arquivo não permitido: %q", relative)
+			return fmt.Errorf("unsupported file type: %q", relative)
 		}
 
 		info, err := entry.Info()
 		if err != nil {
-			return fmt.Errorf("não foi possível ler os metadados de %q: %w", relative, err)
+			return fmt.Errorf("could not read metadata for %q: %w", relative, err)
 		}
 		input, err := os.Open(sourcePath)
 		if err != nil {
-			return fmt.Errorf("não foi possível abrir a origem %q: %w", relative, err)
+			return fmt.Errorf("could not open source %q: %w", relative, err)
 		}
 		if err := makeDestinationWritable(destinationPath); err != nil {
 			input.Close()
-			return fmt.Errorf("não foi possível preparar o destino %q: %w", relative, err)
+			return fmt.Errorf("could not prepare destination %q: %w", relative, err)
 		}
 		output, err := os.OpenFile(
 			destinationPath,
@@ -413,23 +473,23 @@ func copyBatchWithProgress(
 		)
 		if err != nil {
 			input.Close()
-			return fmt.Errorf("não foi possível abrir o destino %q: %w", relative, err)
+			return fmt.Errorf("could not open destination %q: %w", relative, err)
 		}
 
 		_, copyErr := io.Copy(output, input)
 		inputCloseErr := input.Close()
 		outputCloseErr := output.Close()
 		if copyErr != nil {
-			return fmt.Errorf("não foi possível copiar %q: %w", relative, copyErr)
+			return fmt.Errorf("could not copy %q: %w", relative, copyErr)
 		}
 		if inputCloseErr != nil {
-			return fmt.Errorf("não foi possível fechar a origem %q: %w", relative, inputCloseErr)
+			return fmt.Errorf("could not close source %q: %w", relative, inputCloseErr)
 		}
 		if outputCloseErr != nil {
-			return fmt.Errorf("não foi possível fechar o destino %q: %w", relative, outputCloseErr)
+			return fmt.Errorf("could not close destination %q: %w", relative, outputCloseErr)
 		}
 		if err := os.Chtimes(destinationPath, info.ModTime(), info.ModTime()); err != nil {
-			return fmt.Errorf("não foi possível atualizar a data de %q: %w", relative, err)
+			return fmt.Errorf("could not update the timestamp of %q: %w", relative, err)
 		}
 
 		copiedFiles++
@@ -454,13 +514,13 @@ func makeDestinationWritable(destinationPath string) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("o destino existente não é um arquivo comum")
+		return fmt.Errorf("the existing destination is not a regular file")
 	}
 	if info.Mode().Perm()&0o200 != 0 {
 		return nil
 	}
 	if err := os.Chmod(destinationPath, info.Mode().Perm()|0o200); err != nil {
-		return fmt.Errorf("não foi possível remover o atributo somente leitura: %w", err)
+		return fmt.Errorf("could not remove the read-only attribute: %w", err)
 	}
 	return nil
 }
@@ -471,13 +531,13 @@ func archiveDestination(root string, archiveName string) (string, error) {
 	localName := filepath.FromSlash(cleanName)
 	if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, "../") ||
 		path.IsAbs(cleanName) || filepath.IsAbs(localName) || filepath.VolumeName(localName) != "" {
-		return "", fmt.Errorf("caminho inválido dentro do RAR: %q", archiveName)
+		return "", fmt.Errorf("invalid path inside the RAR archive: %q", archiveName)
 	}
 
 	target := filepath.Join(root, localName)
 	relative, err := filepath.Rel(root, target)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("caminho inválido dentro do RAR: %q", archiveName)
+		return "", fmt.Errorf("invalid path inside the RAR archive: %q", archiveName)
 	}
 	return target, nil
 }

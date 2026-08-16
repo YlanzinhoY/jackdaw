@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"unicode"
 
@@ -12,11 +13,16 @@ import (
 type screen int
 
 const (
-	sourceScreen screen = iota
+	packageScreen screen = iota
+	sourceScreen
 	manualPathScreen
 	steamInstallationsScreen
 	installScreen
 	resultScreen
+	saveFolderScreen
+	saveUUIDScreen
+	saveProcessingScreen
+	saveResultScreen
 	errorScreen
 )
 
@@ -26,6 +32,11 @@ type installationFinishedMsg struct {
 
 type installationProgressMsg struct {
 	progress installationProgress
+}
+
+type saveResignFinishedMsg struct {
+	result saveResignResult
+	err    error
 }
 
 var (
@@ -48,20 +59,37 @@ var (
 )
 
 type appModel struct {
-	screen         screen
-	previousScreen screen
-	cursor         int
-	pathInput      string
-	steamPaths     []string
-	selectedPath   string
-	errorMessage   string
-	installEvents  chan tea.Msg
-	progress       installationProgress
-	width          int
+	config          installerConfig
+	showPackageMenu bool
+	screen          screen
+	previousScreen  screen
+	cursor          int
+	packageCursor   int
+	pathInput       string
+	steamPaths      []string
+	selectedPath    string
+	errorMessage    string
+	installEvents   chan tea.Msg
+	progress        installationProgress
+	saveFolderInput string
+	saveFolder      string
+	saveFiles       []string
+	saveUUID        string
+	saveAccountPath string
+	saveResult      saveResignResult
+	width           int
 }
 
 func newAppModel() appModel {
-	return appModel{screen: sourceScreen}
+	return appModel{
+		config:          updateInstallerConfig(),
+		showPackageMenu: true,
+		screen:          packageScreen,
+	}
+}
+
+func newAppModelWithConfig(config installerConfig) appModel {
+	return appModel{config: config, screen: sourceScreen}
 }
 
 func (appModel) Init() tea.Cmd {
@@ -87,19 +115,37 @@ func (model appModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return model, nil
 		}
 		return model, waitForInstallEvent(model.installEvents)
+	case saveResignFinishedMsg:
+		if message.err != nil {
+			model.showError(saveUUIDScreen, message.err.Error())
+			return model, nil
+		}
+		model.saveResult = message.result
+		model.screen = saveResultScreen
+		return model, nil
 	case tea.KeyMsg:
 		if message.Type == tea.KeyCtrlC {
 			return model, tea.Quit
 		}
 
 		switch model.screen {
+		case packageScreen:
+			return model.updatePackageScreen(message)
 		case sourceScreen:
 			return model.updateSourceScreen(message)
 		case manualPathScreen:
 			return model.updateManualPathScreen(message)
 		case steamInstallationsScreen:
 			return model.updateSteamInstallationsScreen(message)
+		case saveFolderScreen:
+			return model.updateSaveFolderScreen(message)
+		case saveUUIDScreen:
+			return model.updateSaveUUIDScreen(message)
 		case resultScreen:
+			if message.Type == tea.KeyEnter || message.Type == tea.KeyEsc || message.String() == "q" {
+				return model, tea.Quit
+			}
+		case saveResultScreen:
 			if message.Type == tea.KeyEnter || message.Type == tea.KeyEsc || message.String() == "q" {
 				return model, tea.Quit
 			}
@@ -112,6 +158,119 @@ func (model appModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return model, nil
+}
+
+func (model appModel) updatePackageScreen(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyUp:
+		if model.packageCursor > 0 {
+			model.packageCursor--
+		}
+	case tea.KeyDown:
+		if model.packageCursor < 2 {
+			model.packageCursor++
+		}
+	case tea.KeyEnter:
+		switch model.packageCursor {
+		case 0:
+			model.config = updateInstallerConfig()
+		case 1:
+			model.config = voicesInstallerConfig()
+		case 2:
+			model.saveFolderInput = ""
+			model.saveFolder = ""
+			model.saveFiles = nil
+			model.saveUUID = ""
+			model.saveAccountPath = ""
+			model.saveResult = saveResignResult{}
+			if uuid, accountPath, err := discoverUbisoftAccountUUID(); err == nil {
+				model.saveUUID = uuid
+				model.saveAccountPath = accountPath
+			}
+			if recommended := recommendedVoicesSaveFolder(); recommended != "" {
+				if info, err := os.Stat(recommended); err == nil && info.IsDir() {
+					model.saveFolderInput = recommended
+				}
+			}
+			model.screen = saveFolderScreen
+			return model, nil
+		}
+		if err := model.config.validate(); err != nil {
+			model.showError(packageScreen, err.Error())
+			return model, nil
+		}
+		model.cursor = 0
+		model.screen = sourceScreen
+	case tea.KeyEsc:
+		return model, tea.Quit
+	}
+	return model, nil
+}
+
+func (model appModel) updateSaveFolderScreen(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyEsc:
+		model.screen = packageScreen
+		return model, nil
+	case tea.KeyEnter:
+		folder, files, err := validateSaveFolder(model.saveFolderInput)
+		if err != nil {
+			model.showError(saveFolderScreen, err.Error())
+			return model, nil
+		}
+		model.saveFolder = folder
+		model.saveFiles = files
+		model.screen = saveUUIDScreen
+		return model, nil
+	case tea.KeyBackspace, tea.KeyDelete:
+		runes := []rune(model.saveFolderInput)
+		if len(runes) > 0 {
+			model.saveFolderInput = string(runes[:len(runes)-1])
+		}
+		return model, nil
+	case tea.KeyCtrlU:
+		model.saveFolderInput = ""
+		return model, nil
+	case tea.KeyRunes:
+		model.saveFolderInput = sanitizePathInput(model.saveFolderInput + string(key.Runes))
+		return model, nil
+	}
+	return model, nil
+}
+
+func (model appModel) updateSaveUUIDScreen(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyEsc:
+		model.screen = saveFolderScreen
+		return model, nil
+	case tea.KeyEnter:
+		if !isValidUUID(model.saveUUID) {
+			model.showError(saveUUIDScreen, appText("save_uuid.invalid", "enter a valid UUID containing 32 hexadecimal characters"))
+			return model, nil
+		}
+		model.screen = saveProcessingScreen
+		return model, resignSaves(model.saveFolder, model.saveUUID)
+	case tea.KeyBackspace, tea.KeyDelete:
+		runes := []rune(model.saveUUID)
+		if len(runes) > 0 {
+			model.saveUUID = formatUUIDInput(string(runes[:len(runes)-1]))
+		}
+		return model, nil
+	case tea.KeyCtrlU:
+		model.saveUUID = ""
+		return model, nil
+	case tea.KeyRunes:
+		model.saveUUID = formatUUIDInput(model.saveUUID + string(key.Runes))
+		return model, nil
+	}
+	return model, nil
+}
+
+func resignSaves(folder string, targetUUID string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := resignSavesAndSynchronizeSettings(folder, targetUUID)
+		return saveResignFinishedMsg{result: result, err: err}
+	}
 }
 
 func (model appModel) updateSourceScreen(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -129,8 +288,10 @@ func (model appModel) updateSourceScreen(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			model.steamPaths = findSteamGameFolders(gameFolderName)
 			switch len(model.steamPaths) {
 			case 0:
-				model.showError(sourceScreen, fmt.Sprintf(
-					"%s não foi encontrado nas bibliotecas da Steam.", gameFolderName,
+				model.showError(sourceScreen, appTextf(
+					"location.not_found",
+					"%s was not found in your Steam libraries.",
+					gameFolderName,
 				))
 			case 1:
 				model.selectedPath = model.steamPaths[0]
@@ -145,6 +306,10 @@ func (model appModel) updateSourceScreen(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		model.screen = manualPathScreen
 		return model, nil
 	case tea.KeyEsc:
+		if model.showPackageMenu {
+			model.screen = packageScreen
+			return model, nil
+		}
 		return model, tea.Quit
 	}
 	return model, nil
@@ -174,7 +339,7 @@ func (model appModel) updateManualPathScreen(key tea.KeyMsg) (tea.Model, tea.Cmd
 		model.pathInput = ""
 		return model, nil
 	case tea.KeyRunes:
-		model.pathInput += string(key.Runes)
+		model.pathInput = sanitizePathInput(model.pathInput + string(key.Runes))
 		return model, nil
 	}
 	return model, nil
@@ -205,13 +370,13 @@ func (model appModel) beginInstallation(previous screen) (tea.Model, tea.Cmd) {
 	model.screen = installScreen
 	model.progress = installationProgress{Stage: stageDownloading}
 	model.installEvents = make(chan tea.Msg)
-	return model, installFiles(model.selectedPath, model.installEvents)
+	return model, installFiles(model.config, model.selectedPath, model.installEvents)
 }
 
-func installFiles(gamePath string, events chan tea.Msg) tea.Cmd {
+func installFiles(config installerConfig, gamePath string, events chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			err := downloadFilesWithProgress(gamePath, func(progress installationProgress) {
+			err := downloadPackageWithProgress(config, gamePath, func(progress installationProgress) {
 				events <- installationProgressMsg{progress: progress}
 			})
 			events <- installationFinishedMsg{err: err}
@@ -236,6 +401,8 @@ func (model *appModel) showError(previous screen, message string) {
 func (model appModel) View() string {
 	var content string
 	switch model.screen {
+	case packageScreen:
+		content = model.packageView()
 	case sourceScreen:
 		content = model.sourceView()
 	case manualPathScreen:
@@ -246,6 +413,14 @@ func (model appModel) View() string {
 		content = model.installView()
 	case resultScreen:
 		content = model.resultView()
+	case saveFolderScreen:
+		content = model.saveFolderView()
+	case saveUUIDScreen:
+		content = model.saveUUIDView()
+	case saveProcessingScreen:
+		content = model.saveProcessingView()
+	case saveResultScreen:
+		content = model.saveResultView()
 	case errorScreen:
 		content = model.errorView()
 	}
@@ -254,20 +429,115 @@ func (model appModel) View() string {
 	if model.width > 0 {
 		container = container.MaxWidth(model.width)
 	}
+	if watermark := appText("watermark", "Made by YlanzinhoY"); watermark != "" {
+		content += "\n\n" + mutedStyle.Render(watermark)
+	}
 	return container.Render(content)
+}
+
+func (model appModel) packageView() string {
+	options := []string{
+		appText("menu.update", "Install update 1.0.6 — Hypervisor"),
+		appText("menu.voices", "Install Voices38 pack — HV to Voices"),
+		appText("menu.resign", "Resign save files"),
+	}
+
+	var builder strings.Builder
+	builder.WriteString(titleStyle.Render(appText("brand.title", "ASSASSIN'S CREED BLACK FLAG RESYNCED")))
+	builder.WriteString("\n")
+	builder.WriteString(mutedStyle.Render(appText("menu.subtitle", "Choose an action")))
+	builder.WriteString("\n\n")
+	for index, option := range options {
+		prefix := "  "
+		style := lipgloss.NewStyle()
+		if index == model.packageCursor {
+			prefix = "› "
+			style = selectedStyle
+		}
+		builder.WriteString(style.Render(prefix + option))
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\n")
+	builder.WriteString(mutedStyle.Render(appText("controls.menu", "↑/↓ navigate • Enter select • Esc quit")))
+	return builder.String()
+}
+
+func (model appModel) saveFolderView() string {
+	input := model.saveFolderInput
+	if input == "" {
+		input = mutedStyle.Render(appText(
+			"save_folder.placeholder",
+			`C:\Users\<WindowsUser>\AppData\Roaming\Goldberg UplayEmu Saves\66088`,
+		))
+	} else {
+		input = pathStyle.Render(input)
+	}
+	uuidStatus := mutedStyle.Render(appText(
+		"save_folder.uuid_missing",
+		"Account UUID was not detected automatically; you can enter it on the next screen.",
+	))
+	if model.saveAccountPath != "" {
+		uuidStatus = successStyle.Render(appTextf(
+			"save_folder.uuid_found",
+			"UUID detected automatically: %s",
+			model.saveUUID,
+		)) +
+			"\n" + mutedStyle.Render(model.saveAccountPath)
+	}
+	return titleStyle.Render(appText("save_folder.title", "SAVE FOLDER")) +
+		"\n\n" + appText("save_folder.prompt", "Paste the path to the folder containing the .save files:") +
+		"\n\n" + selectedStyle.Render("> ") + input + selectedStyle.Render("█") +
+		"\n\n" + mutedStyle.Render(appText("save_folder.detect_hint", "ACBlackFlag[...].save files are detected automatically.")) +
+		"\n\n" + uuidStatus +
+		"\n\n" + mutedStyle.Render(appText("save_folder.controls", "Enter continue • Ctrl+U clear • Esc back"))
+}
+
+func (model appModel) saveUUIDView() string {
+	input := model.saveUUID
+	if input == "" {
+		input = mutedStyle.Render(appText("save_uuid.placeholder", "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"))
+	} else {
+		input = pathStyle.Render(input)
+	}
+	uuidExplanation := appText("save_uuid.prompt", "Confirm or enter the UUID of the account that will use these saves:")
+	if model.saveAccountPath != "" {
+		uuidExplanation = appText("save_uuid.detected_prompt", "Confirm the detected UUID or edit it if necessary:")
+	}
+	return titleStyle.Render(appText("save_uuid.title", "NEW SAVE KEY")) +
+		"\n\n" + appTextf("save_uuid.files_found", "%d .save file(s) found in:", len(model.saveFiles)) + "\n" +
+		pathStyle.Render(model.saveFolder) +
+		"\n\n" + uuidExplanation +
+		"\n\n" + selectedStyle.Render("> ") + input + selectedStyle.Render("█") +
+		"\n\n" + mutedStyle.Render(appText("save_uuid.hint", "The previous key is detected automatically from the save data.")) +
+		"\n\n" + mutedStyle.Render(appText("save_uuid.controls", "Enter resign • Ctrl+U clear • Esc back"))
+}
+
+func (model appModel) saveProcessingView() string {
+	return titleStyle.Render(appText("save_processing.title", "RESIGNING SAVE FILES")) +
+		"\n\n" + pathStyle.Render(model.saveFolder) +
+		"\n\n" + appText("save_processing.status", "Creating backups and resigning files...") +
+		"\n\n" + mutedStyle.Render(appText("save_processing.controls", "Do not close the program. Ctrl+C to cancel"))
+}
+
+func (model appModel) saveResultView() string {
+	return successStyle.Render(appText("save_result.title", "SAVE FILES RESIGNED")) +
+		"\n\n" + appTextf("save_result.count", "%d file(s) resigned.", model.saveResult.FileCount) +
+		"\n\n" + appText("save_result.backup", "Original-file backup:") + "\n" + pathStyle.Render(model.saveResult.BackupDir) +
+		"\n\n" + appText("save_result.settings", "UserId synchronized in:") + "\n" + pathStyle.Render(model.saveResult.SettingsPath) +
+		"\n\n" + mutedStyle.Render(appText("controls.quit", "Enter or q to quit"))
 }
 
 func (model appModel) sourceView() string {
 	options := []string{
-		"Procurar automaticamente na Steam",
-		"Informar o caminho completo",
+		appText("location.auto", "Find automatically through Steam"),
+		appText("location.manual", "Enter the full path"),
 	}
 
 	var builder strings.Builder
-	builder.WriteString(titleStyle.Render("ASSASSIN'S CREED BLACK FLAG RESYNCED"))
+	builder.WriteString(titleStyle.Render(appText("brand.title", "ASSASSIN'S CREED BLACK FLAG RESYNCED")))
 	builder.WriteString("\n")
-	builder.WriteString(mutedStyle.Render("Instalador da atualização 1.0.6"))
-	builder.WriteString("\n\nOnde o jogo está instalado?\n\n")
+	builder.WriteString(mutedStyle.Render(model.config.subtitle))
+	builder.WriteString("\n\n" + appText("location.prompt", "Where is the game installed?") + "\n\n")
 	for index, option := range options {
 		prefix := "  "
 		style := lipgloss.NewStyle()
@@ -279,26 +549,29 @@ func (model appModel) sourceView() string {
 		builder.WriteString("\n")
 	}
 	builder.WriteString("\n")
-	builder.WriteString(mutedStyle.Render("↑/↓ navegar • Enter selecionar • Esc sair"))
+	builder.WriteString(mutedStyle.Render(appText("controls.menu", "↑/↓ navigate • Enter select • Esc quit")))
 	return builder.String()
 }
 
 func (model appModel) manualPathView() string {
 	input := model.pathInput
 	if input == "" {
-		input = mutedStyle.Render(`D:\SteamLibrary\steamapps\common\Assassin's Creed Black Flag Resynced`)
+		input = mutedStyle.Render(appText(
+			"manual_path.placeholder",
+			`D:\SteamLibrary\steamapps\common\Assassin's Creed Black Flag Resynced`,
+		))
 	} else {
 		input = pathStyle.Render(input)
 	}
-	return titleStyle.Render("CAMINHO DO JOGO") +
-		"\n\nCole ou digite o caminho completo:\n\n" +
+	return titleStyle.Render(appText("manual_path.title", "GAME FOLDER")) +
+		"\n\n" + appText("manual_path.prompt", "Paste or enter the full path:") + "\n\n" +
 		selectedStyle.Render("> ") + input + selectedStyle.Render("█") +
-		"\n\n" + mutedStyle.Render("Enter confirmar • Ctrl+U limpar • Esc voltar")
+		"\n\n" + mutedStyle.Render(appText("manual_path.controls", "Enter confirm • Ctrl+U clear • Esc back"))
 }
 
 func (model appModel) steamInstallationsView() string {
 	var builder strings.Builder
-	builder.WriteString(titleStyle.Render("INSTALAÇÕES ENCONTRADAS"))
+	builder.WriteString(titleStyle.Render(appText("steam.title", "INSTALLATIONS FOUND")))
 	builder.WriteString("\n\n")
 	for index, path := range model.steamPaths {
 		prefix := "  "
@@ -311,15 +584,15 @@ func (model appModel) steamInstallationsView() string {
 		builder.WriteString("\n")
 	}
 	builder.WriteString("\n")
-	builder.WriteString(mutedStyle.Render("↑/↓ navegar • Enter selecionar • Esc voltar"))
+	builder.WriteString(mutedStyle.Render(appText("steam.controls", "↑/↓ navigate • Enter select • Esc back")))
 	return builder.String()
 }
 
 func (model appModel) resultView() string {
-	return successStyle.Render("ATUALIZAÇÃO INSTALADA") +
+	return successStyle.Render(model.config.resultTitle) +
 		"\n\n" + pathStyle.Render(model.selectedPath) +
-		"\n\n" + mutedStyle.Render("Todos os lotes foram extraídos e copiados para a pasta do jogo.") +
-		"\n\n" + mutedStyle.Render("Enter ou q para sair")
+		"\n\n" + mutedStyle.Render(model.config.resultText) +
+		"\n\n" + mutedStyle.Render(appText("controls.quit", "Enter or q to quit"))
 }
 
 func (model appModel) installView() string {
@@ -328,36 +601,40 @@ func (model appModel) installView() string {
 	case stageDownloading:
 		status = model.downloadProgressView()
 	case stageListing:
-		status = "Lendo a lista de arquivos do RAR..."
+		status = appText("install.listing", "Reading the RAR file list...")
 	case stageExtracting:
-		status = fmt.Sprintf(
-			"Extraindo lote %d/%d (até %d arquivos por lote)...",
+		status = appTextf(
+			"install.extracting",
+			"Extracting batch %d/%d (up to %d files per batch)...",
 			model.progress.CurrentBatch,
 			model.progress.TotalBatches,
 			extractionBatchSize,
 		)
 	case stageCopying:
-		status = fmt.Sprintf(
-			"Copiando lote %d/%d... %d/%d arquivos",
+		status = appTextf(
+			"install.copying",
+			"Copying batch %d/%d... %d/%d files",
 			model.progress.CurrentBatch,
 			model.progress.TotalBatches,
 			model.progress.CompletedFiles,
 			model.progress.TotalFiles,
 		)
+	case stageCleaning:
+		status = appText("install.cleaning", "Removing unwanted voice-pack files...")
 	}
 
-	return titleStyle.Render("BAIXANDO E INSTALANDO") +
+	return titleStyle.Render(appText("install.title", "DOWNLOADING AND INSTALLING")) +
 		"\n\n" + pathStyle.Render(model.selectedPath) +
 		"\n\n" + status +
-		"\n\n" + mutedStyle.Render("O arquivo tem aproximadamente 3,6 GiB. Ctrl+C para cancelar")
+		"\n\n" + mutedStyle.Render(model.config.downloadHint)
 }
 
 func (model appModel) downloadProgressView() string {
 	if model.progress.TotalBytes == 0 && model.progress.Downloaded == 0 {
-		return mutedStyle.Render("Conectando ao servidor...")
+		return mutedStyle.Render(appText("download.connecting", "Connecting to the server..."))
 	}
 	if model.progress.TotalBytes <= 0 {
-		return mutedStyle.Render("Baixado: " + formatBytes(model.progress.Downloaded))
+		return mutedStyle.Render(appTextf("download.downloaded", "Downloaded: %s", formatBytes(model.progress.Downloaded)))
 	}
 
 	percentage := int(float64(model.progress.Downloaded) / float64(model.progress.TotalBytes) * 100)
@@ -404,9 +681,9 @@ func (model appModel) errorView() string {
 	if messageWidth < 20 {
 		messageWidth = 80
 	}
-	return errorStyle.Render("NÃO FOI POSSÍVEL CONTINUAR") +
+	return errorStyle.Render(appText("error.title", "UNABLE TO CONTINUE")) +
 		"\n\n" + wrapPlainText(model.errorMessage, messageWidth) +
-		"\n\n" + mutedStyle.Render("Enter ou Esc para voltar")
+		"\n\n" + mutedStyle.Render(appText("error.controls", "Enter or Esc to go back"))
 }
 
 func wrapPlainText(text string, width int) string {

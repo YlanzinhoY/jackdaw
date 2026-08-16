@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 const gameFolderName = "Assassin's Creed Black Flag Resynced"
@@ -97,30 +98,40 @@ func readSteamLibraries(installRoot string) []string {
 }
 
 func validateGamePath(value string) (string, error) {
+	value = sanitizePathInput(value)
 	value = strings.Trim(strings.TrimSpace(value), `"`)
 	value = os.ExpandEnv(value)
 	if value == "" {
-		return "", fmt.Errorf("informe o caminho completo da pasta %s", gameFolderName)
+		return "", fmt.Errorf("enter the full path to the %s folder", gameFolderName)
 	}
 
 	absolutePath, err := filepath.Abs(value)
 	if err != nil {
-		return "", fmt.Errorf("caminho inválido %q: %w", value, err)
+		return "", fmt.Errorf("invalid path %q: %w", value, err)
 	}
 	absolutePath = filepath.Clean(absolutePath)
 
 	info, err := os.Stat(absolutePath)
 	if err != nil {
-		return "", fmt.Errorf("não foi possível acessar %q: %w", absolutePath, err)
+		return "", fmt.Errorf("could not access %q: %w", absolutePath, err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("%q não é uma pasta", absolutePath)
+		return "", fmt.Errorf("%q is not a folder", absolutePath)
 	}
 	if !strings.EqualFold(filepath.Base(absolutePath), gameFolderName) {
-		return "", fmt.Errorf("a pasta selecionada deve se chamar %q", gameFolderName)
+		return "", fmt.Errorf("the selected folder must be named %q", gameFolderName)
 	}
 
 	return absolutePath, nil
+}
+
+func sanitizePathInput(value string) string {
+	return strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) || character == '\ufeff' {
+			return -1
+		}
+		return character
+	}, value)
 }
 
 func uniquePaths(paths []string) []string {
